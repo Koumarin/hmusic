@@ -4,6 +4,7 @@ import Data.List
 import System.IO
 import Data.IORef
 import System.IO.Unsafe
+import Data.UUID.V4
 
 
 data MPattern = X | O | MPattern :|  MPattern
@@ -818,6 +819,9 @@ musicState = unsafePerformIO (newIORef Nothing)
 musicBPM :: IORef (Maybe Float)
 musicBPM = unsafePerformIO (newIORef Nothing)
 
+sonicPiContext :: IORef (Maybe String)
+sonicPiContext = unsafePerformIO (newIORef Nothing)
+
 genSonicPI :: Float  -> Track -> String
 genSonicPI time track = genSonicPI_ time (listOfBeats track)
 
@@ -892,30 +896,32 @@ play bpm track = do
 
 loop :: Float -> Track  -> IO ()
 loop bpm track = do
-        let sizeTrack = lengthTrack track
-        writeIORef musicState (Just track)
-        writeIORef musicBPM (Just (60/bpm)) 
-        
-	writeFile "HMusic_temp.rb" $ "live_loop :hmusic do\n" ++ genSonicPI (60/bpm) track ++ "end"
-	v <- system $ sonicPiToolPath++"sonic-pi-tool eval-file HMusic_temp.rb"
-    	print $ show v
+  ctx <- getSonicPiContext
+  writeIORef musicState (Just track)
+  writeIORef musicBPM (Just (60/bpm))
+  writeFile "HMusic_temp.rb" $
+    "live_loop :hmusic_" ++ ctx ++ " do\n"
+    ++ genSonicPI (60/bpm) track ++ "end"
+  v <- system $ sonicPiToolPath++"sonic-pi-tool eval-file HMusic_temp.rb"
+  print $ show v
 
 applyToMusic :: (Track -> Track) -> IO ()
 applyToMusic ftrack = do
-    v <- readIORef musicState
-    case v of
-        Just t -> do 
-                  mbpm <- readIORef musicBPM
-                  case mbpm of
-                    Just bpm -> do
-                     let newTrack = ftrack t
-                     --print $ show newTrack
-                     writeIORef musicState (Just newTrack)
-                     writeFile "HMusic_temp.rb" $ "live_loop :hmusic do\n" ++ genSonicPI bpm newTrack ++ "end"
-                     r <-system $ sonicPiToolPath ++ "sonic-pi-tool eval-file HMusic_temp.rb"
-                     print $ show r
-                    --Nothing -> error "No bpm for the running track" 
-        Nothing -> error "No running track to be modified"
+  ctx <- getSonicPiContext
+  v <- readIORef musicState
+  case v of
+    Just t -> do
+      mbpm <- readIORef musicBPM
+      case mbpm of
+        Just bpm -> do
+          let newTrack = ftrack t
+          writeIORef musicState (Just newTrack)
+          writeFile "HMusic_temp.rb" $
+            "live_loop :hmusic_" ++ ctx ++ " do\n"
+            ++ genSonicPI bpm newTrack ++ "end"
+          r <-system $ sonicPiToolPath ++ "sonic-pi-tool eval-file HMusic_temp.rb"
+          print $ show r
+    Nothing -> error "No running track to be modified"
 
 startMusicServer :: IO ()
 startMusicServer = do
@@ -927,3 +933,21 @@ stopMusicServer = do
    v <- system $ sonicPiToolPath ++ "sonic-pi-tool stop"
    print $ show v
 
+-- Get current Sonic Pi musical context, or create a new one if none exists.
+getSonicPiContext :: IO (String)
+getSonicPiContext = do
+  v <- readIORef sonicPiContext
+  case v of
+    -- We already have a context, so just return it.
+    Just ctx -> do
+      return ctx
+    -- Otherwise we create one and save it.
+    Nothing -> do
+      r <- nextRandom
+      -- Replace dashes with underscores before passing to Sonic Pi.
+      let s = let
+            replace '-' = '_'
+            replace  c  =  c
+            in map replace $ show r
+      writeIORef sonicPiContext (Just s)
+      return s
