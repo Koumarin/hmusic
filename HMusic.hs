@@ -1,8 +1,10 @@
 module HMusic where
-import System.Cmd
+
 import Data.List
-import System.IO
 import Data.IORef
+import System.Cmd
+import System.Exit
+import System.IO
 import System.IO.Unsafe
 import Data.UUID.V4
 
@@ -822,6 +824,9 @@ musicBPM = unsafePerformIO (newIORef Nothing)
 sonicPiContext :: IORef (Maybe String)
 sonicPiContext = unsafePerformIO (newIORef Nothing)
 
+sonicPiHost :: IORef (Maybe String)
+sonicPiHost = unsafePerformIO (newIORef Nothing)
+
 genSonicPI :: Float  -> Track -> String
 genSonicPI time track = genSonicPI_ time (listOfBeats track)
 
@@ -882,20 +887,20 @@ effectToString (Sustain n) = "sustain: " ++ show n
 effectToString (Start n) = "start: " ++ show n
 effectToString (Finish n) = "finish: " ++ show n
 effectToString Echo = "echo" 
-    
 
 play :: Float -> Track  -> IO ()
 play bpm track = do
-        let sizeTrack = lengthTrack track
-        writeIORef musicState (Just track) 
-        
-	writeFile "HMusic_temp.rb" $ genSonicPI (60/bpm) track 
-	v <- system $ sonicPiToolPath++"sonic-pi-tool eval-file HMusic_temp.rb"
-    	print $ show v
-
+  host <- getSonicPiHost
+  let sizeTrack = lengthTrack track
+  writeIORef musicState (Just track)
+  writeFile "HMusic_temp.rb" $ genSonicPI (60/bpm) track
+  v <- system $ sonicPiToolPath
+       ++ "sonic-pi-tool --host " ++ host ++ " eval-file HMusic_temp.rb"
+  print $ show v
 
 loop :: Float -> Track  -> IO ()
 loop bpm track = do
+  host <- getSonicPiHost
   ctx <- getSonicPiContext
   writeIORef musicState (Just track)
   writeIORef musicBPM (Just (60/bpm))
@@ -925,13 +930,14 @@ applyToMusic ftrack = do
 
 startMusicServer :: IO ()
 startMusicServer = do
-   v <- system $ sonicPiToolPath ++ "sonic-pi-tool start-server"
-   print $ show v
+  setSonicPiHost "localhost"
+  v <- system $ sonicPiToolPath ++ "sonic-pi-tool start-server"
+  print $ show v
 
 stopMusicServer :: IO ()
-stopMusicServer = do 
-   v <- system $ sonicPiToolPath ++ "sonic-pi-tool stop"
-   print $ show v
+stopMusicServer = do
+  v <- system $ sonicPiToolPath ++ "sonic-pi-tool stop"
+  print $ show v
 
 -- Get current Sonic Pi musical context, or create a new one if none exists.
 getSonicPiContext :: IO (String)
@@ -951,3 +957,26 @@ getSonicPiContext = do
             in map replace $ show r
       writeIORef sonicPiContext (Just s)
       return s
+
+getSonicPiHost :: IO (String)
+getSonicPiHost = do
+  host <- readIORef sonicPiHost
+  case host of
+    -- If we already have a host, return it.
+    Just host -> do
+      return host
+    -- Otherwise, we first check if Sonic Pi is running on our machine,
+    Nothing -> do
+      status <- system $ sonicPiToolPath ++ "sonic-pi-tool check"
+      case status of
+        -- then we return our own IP.
+        ExitSuccess -> do
+          setSonicPiHost "localhost"
+          return "localhost"
+        -- Otherwise, we signal an error to the user.
+        otherwise -> do
+          error "Sorry, I could not find a running instance of Sonic Pi."
+
+setSonicPiHost :: String -> IO ()
+setSonicPiHost host =
+  writeIORef sonicPiHost (Just host)
