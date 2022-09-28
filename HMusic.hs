@@ -827,6 +827,9 @@ sonicPiContext = unsafePerformIO (newIORef Nothing)
 sonicPiHost :: IORef (Maybe String)
 sonicPiHost = unsafePerformIO (newIORef Nothing)
 
+masterContext :: IORef (Maybe String)
+masterContext = unsafePerformIO (newIORef Nothing)
+
 genSonicPI :: Float  -> Track -> String
 genSonicPI time track = genSonicPI_ time (listOfBeats track)
 
@@ -901,11 +904,13 @@ play bpm track = do
 loop :: Float -> Track  -> IO ()
 loop bpm track = do
   host <- getSonicPiHost
-  ctx <- getSonicPiContext
+  ctx  <- getSonicPiContext
+  sync <- getSync
   writeIORef musicState (Just track)
   writeIORef musicBPM (Just (60/bpm))
   writeFile "HMusic_temp.rb" $
     "live_loop :hmusic_" ++ ctx ++ " do\n"
+    ++ sync
     ++ genSonicPI (60/bpm) track ++ "end"
   v <- system $ sonicPiToolPath++"sonic-pi-tool eval-file HMusic_temp.rb"
   print $ show v
@@ -920,13 +925,26 @@ applyToMusic ftrack = do
       case mbpm of
         Just bpm -> do
           let newTrack = ftrack t
+          sync <- getSync
           writeIORef musicState (Just newTrack)
           writeFile "HMusic_temp.rb" $
             "live_loop :hmusic_" ++ ctx ++ " do\n"
+            ++ sync
             ++ genSonicPI bpm newTrack ++ "end"
           r <-system $ sonicPiToolPath ++ "sonic-pi-tool eval-file HMusic_temp.rb"
           print $ show r
     Nothing -> error "No running track to be modified"
+
+-- Creates line to sync with master context,
+-- or an empty line if no master exists.
+getSync :: IO (String)
+getSync = do
+  master <- readIORef masterContext
+  case master of
+    Just master -> do
+      return $ "sync :" ++ "hmusic_" ++ master ++ "\n"
+    Nothing -> do
+      return ""
 
 startMusicServer :: IO ()
 startMusicServer = do
@@ -958,6 +976,12 @@ getSonicPiContext = do
       writeIORef sonicPiContext (Just s)
       return s
 
+-- Change to another context.
+setSonicPiContext :: String -> IO ()
+setSonicPiContext context = do
+  writeIORef sonicPiContext (Just context)
+
+-- Sonic Pi server hostname.
 getSonicPiHost :: IO (String)
 getSonicPiHost = do
   host <- readIORef sonicPiHost
@@ -977,6 +1001,18 @@ getSonicPiHost = do
         otherwise -> do
           error "Sorry, I could not find a running instance of Sonic Pi."
 
+-- Tells Sonic Pi Tool the hostname where to find the server.
 setSonicPiHost :: String -> IO ()
 setSonicPiHost host =
   writeIORef sonicPiHost (Just host)
+
+-- Makes current track synchronize to given master.
+syncTo :: String -> IO ()
+syncTo master = do
+  writeIORef masterContext (Just master)
+  state <- readIORef musicState
+  case state of
+    Just state -> do
+      applyToMusic id
+    Nothing -> do
+      return ()
