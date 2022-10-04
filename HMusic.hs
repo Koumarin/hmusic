@@ -937,9 +937,9 @@ callSonicPi :: String -> IO (String)
 callSonicPi command = do
   host   <- getSonicPiHost
   status <- system $
-    sonicPiToolPath ++ (concat . intersperse " ") ["sonic-pi-tool --host",
-                                                   host,
-                                                   command]
+    sonicPiToolPath ++ intercalate " " ["sonic-pi-tool --host",
+                                        host,
+                                        command]
   return $ show status
 
 -- Creates line to sync with master context,
