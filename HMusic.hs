@@ -893,17 +893,14 @@ effectToString Echo = "echo"
 
 play :: Float -> Track  -> IO ()
 play bpm track = do
-  host <- getSonicPiHost
   let sizeTrack = lengthTrack track
   writeIORef musicState (Just track)
   writeFile "HMusic_temp.rb" $ genSonicPI (60/bpm) track
-  v <- system $ sonicPiToolPath
-       ++ "sonic-pi-tool --host " ++ host ++ " eval-file HMusic_temp.rb"
-  print $ show v
+  status <- callSonicPi "eval-file HMusic_temp.rb"
+  print status
 
 loop :: Float -> Track  -> IO ()
 loop bpm track = do
-  host <- getSonicPiHost
   ctx  <- getSonicPiContext
   sync <- getSync
   writeIORef musicState (Just track)
@@ -912,13 +909,13 @@ loop bpm track = do
     "live_loop :hmusic_" ++ ctx ++ " do\n"
     ++ sync
     ++ genSonicPI (60/bpm) track ++ "end"
-  v <- system $ sonicPiToolPath++"sonic-pi-tool eval-file HMusic_temp.rb"
-  print $ show v
+  status <- callSonicPi "eval-file HMusic_temp.rb"
+  print status
 
 applyToMusic :: (Track -> Track) -> IO ()
 applyToMusic ftrack = do
-  ctx <- getSonicPiContext
-  v <- readIORef musicState
+  ctx  <- getSonicPiContext
+  v    <- readIORef musicState
   case v of
     Just t -> do
       mbpm <- readIORef musicBPM
@@ -931,9 +928,19 @@ applyToMusic ftrack = do
             "live_loop :hmusic_" ++ ctx ++ " do\n"
             ++ sync
             ++ genSonicPI bpm newTrack ++ "end"
-          r <-system $ sonicPiToolPath ++ "sonic-pi-tool eval-file HMusic_temp.rb"
-          print $ show r
+          status <- callSonicPi "eval-file HMusic_temp.rb"
+          print status
     Nothing -> error "No running track to be modified"
+
+-- Sends a command to Sonic Pi through Sonic Pi Tool.
+callSonicPi :: String -> IO (String)
+callSonicPi command = do
+  host   <- getSonicPiHost
+  status <- system $
+    sonicPiToolPath ++ (concat . intersperse " ") ["sonic-pi-tool --host",
+                                                   host,
+                                                   command]
+  return $ show status
 
 -- Creates line to sync with master context,
 -- or an empty line if no master exists.
