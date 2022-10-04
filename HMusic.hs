@@ -893,7 +893,6 @@ effectToString Echo = "echo"
 
 play :: Float -> Track  -> IO ()
 play bpm track = do
-  let sizeTrack = lengthTrack track
   writeIORef musicState (Just track)
   writeFile "HMusic_temp.rb" $ genSonicPI (60/bpm) track
   status <- callSonicPi "eval-file HMusic_temp.rb"
