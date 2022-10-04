@@ -906,8 +906,8 @@ loop bpm track = do
   writeIORef musicState (Just track)
   writeIORef musicBPM (Just (60/bpm))
   writeFile "HMusic_temp.rb" $
-    "live_loop :hmusic_" ++ ctx ++ " do\n"
-    ++ sync
+    sync
+    ++ "live_loop :hmusic_" ++ ctx ++ " do\n"
     ++ genSonicPI (60/bpm) track ++ "end"
   status <- callSonicPi "eval-file HMusic_temp.rb"
   print status
@@ -925,8 +925,8 @@ applyToMusic ftrack = do
           sync <- getSync
           writeIORef musicState (Just newTrack)
           writeFile "HMusic_temp.rb" $
-            "live_loop :hmusic_" ++ ctx ++ " do\n"
-            ++ sync
+            sync
+            ++ "live_loop :hmusic_" ++ ctx ++ " do\n"
             ++ genSonicPI bpm newTrack ++ "end"
           status <- callSonicPi "eval-file HMusic_temp.rb"
           print status
