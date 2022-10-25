@@ -3,7 +3,7 @@ module HMusic where
 import Data.List
 import Data.IORef
 import Data.UUID.V4
-import Network.Socket
+import Network.Connection
 import System.Cmd
 import System.Exit
 import System.IO
