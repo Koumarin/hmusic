@@ -1,0 +1,12 @@
+## Backup files
+*~
+\#*\#
+
+## Cabal
+dist
+dist-*
+cabal-dev
+
+## Temporary files
+HMusic_temp.rb
+sonic-pi-tool

@@ -2,11 +2,12 @@ module HMusic where
 
 import Data.List
 import Data.IORef
+import Data.UUID.V4
+import Network.Socket
 import System.Cmd
 import System.Exit
 import System.IO
 import System.IO.Unsafe
-import Data.UUID.V4
 
 
 data MPattern = X | O | MPattern :|  MPattern
@@ -26,7 +27,7 @@ type Instrument = String
 
 
 sonicPiToolPath :: String
-sonicPiToolPath = "/home/andre/.cargo/bin/"
+sonicPiToolPath = "./"
 
 infixr  7  :|
 infixr  6  :||
