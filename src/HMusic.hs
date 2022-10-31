@@ -1,13 +1,15 @@
 module HMusic where
 
-import Data.List
-import Data.IORef
-import Data.UUID.V4
-import Network.Connection
-import System.Cmd
-import System.Exit
-import System.IO
-import System.IO.Unsafe
+import           Control.Monad.IO.Class
+import qualified Data.ByteString.Char8  as BS
+import           Data.List
+import           Data.IORef
+import           Data.UUID.V4
+import           Network.Simple.TCP
+import           System.Cmd
+import           System.Exit
+import           System.IO
+import           System.IO.Unsafe
 
 
 data MPattern = X | O | MPattern :|  MPattern
@@ -1023,3 +1025,23 @@ syncTo master = do
       applyToMusic id
     Nothing -> do
       return ()
+
+hmusicServe :: MonadIO m => m r
+hmusicServe =
+  serve (Host "localhost") "8000" f
+  where
+    f = \(connectionSocket, remote) ->
+          do putStrLn $ "Connection established from " ++ show remote
+             mstr <- recv connectionSocket 10
+             case mstr of
+               Just str -> do
+                 BS.putStrLn str
+               Nothing -> do
+                 return ()
+
+hmusicConnect :: String -> String -> IO ()
+hmusicConnect host msg =
+  connect host "8000" $ \(connectionSocket, remote) ->
+                          do putStrLn $ "Connection established to "
+                               ++ show remote
+                             send connectionSocket $ BS.pack msg
