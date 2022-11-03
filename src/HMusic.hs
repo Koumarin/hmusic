@@ -5,7 +5,7 @@ import qualified Data.ByteString.Char8  as BS
 import           Data.List
 import           Data.IORef
 import           Data.UUID.V4
-import           Network.Simple.TCP
+import qualified Network.Simple.TCP     as Net
 import           System.Cmd
 import           System.Exit
 import           System.IO
@@ -830,6 +830,9 @@ sonicPiContext = unsafePerformIO (newIORef Nothing)
 sonicPiHost :: IORef (Maybe String)
 sonicPiHost = unsafePerformIO (newIORef Nothing)
 
+musicHost :: IORef (Maybe String)
+musicHost = unsafePerformIO (newIORef Nothing)
+
 masterContext :: IORef (Maybe String)
 masterContext = unsafePerformIO (newIORef Nothing)
 
@@ -1026,22 +1029,24 @@ syncTo master = do
     Nothing -> do
       return ()
 
-hmusicServe :: MonadIO m => m r
-hmusicServe =
-  serve (Host "localhost") "8000" f
+-- Create an HMusic server for clients to connect to.
+serve :: MonadIO m => m r
+serve =
+  Net.serve (Net.Host "localhost") "8000" f
   where
-    f = \(connectionSocket, remote) ->
+    f = \(socket, remote) ->
           do putStrLn $ "Connection established from " ++ show remote
-             mstr <- recv connectionSocket 10
+             mstr <- Net.recv socket 10
              case mstr of
                Just str -> do
                  BS.putStrLn str
                Nothing -> do
                  return ()
 
-hmusicConnect :: String -> String -> IO ()
-hmusicConnect host msg =
-  connect host "8000" $ \(connectionSocket, remote) ->
-                          do putStrLn $ "Connection established to "
-                               ++ show remote
-                             send connectionSocket $ BS.pack msg
+-- Connect to a running HMusic instance.
+connect :: String -> IO ()
+connect host =
+  Net.connect host "8000" $ \(socket, remote) ->
+                              do putStrLn $ "Connection established to "
+                                   ++ show remote
+                                 writeIORef musicHost (Just host)
