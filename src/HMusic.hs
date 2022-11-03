@@ -27,6 +27,8 @@ data Effect = Reverb Float | Amp Float | Attack Float | Release Float | Rate Flo
 
 type Instrument = String
 
+type Context = (String, Float, Maybe Track)
+
 
 sonicPiToolPath :: String
 sonicPiToolPath = "./"
@@ -818,23 +820,20 @@ listOfBeats t = case removeBeatTrack t of
 ---------------------------------------------------------------------------
 
 
-musicState :: IORef (Maybe Track)
-musicState = unsafePerformIO (newIORef Nothing)
+currentContext :: IORef (Maybe Context)
+currentContext = unsafePerformIO (newIORef Nothing)
 
-musicBPM :: IORef (Maybe Float)
-musicBPM = unsafePerformIO (newIORef Nothing)
-
-sonicPiContext :: IORef (Maybe String)
-sonicPiContext = unsafePerformIO (newIORef Nothing)
+sessionContexts :: IORef (Maybe [Context])
+sessionContexts = unsafePerformIO (newIORef Nothing)
 
 sonicPiHost :: IORef (Maybe String)
 sonicPiHost = unsafePerformIO (newIORef Nothing)
 
-musicHost :: IORef (Maybe String)
-musicHost = unsafePerformIO (newIORef Nothing)
-
 masterContext :: IORef (Maybe String)
 masterContext = unsafePerformIO (newIORef Nothing)
+
+musicHost :: IORef (Maybe String)
+musicHost = unsafePerformIO (newIORef Nothing)
 
 genSonicPI :: Float  -> Track -> String
 genSonicPI time track = genSonicPI_ time (listOfBeats track)
@@ -899,43 +898,44 @@ effectToString Echo = "echo"
 
 play :: Float -> Track  -> IO ()
 play bpm track = do
-  writeIORef musicState (Just track)
+  --writeIORef musicState (Just track)
   writeFile "HMusic_temp.rb" $ genSonicPI (60/bpm) track
   status <- callSonicPi "eval-file HMusic_temp.rb"
   print status
 
 loop :: Float -> Track  -> IO ()
 loop bpm track = do
-  ctx  <- getSonicPiContext
-  sync <- getSync
-  writeIORef musicState (Just track)
-  writeIORef musicBPM (Just (60/bpm))
+  sync         <- getSync
+  (name, _, _) <- getCurrentContext
+  updateCurrentContext bpm track
   writeFile "HMusic_temp.rb" $
     sync
-    ++ "live_loop :hmusic_" ++ ctx ++ " do\n"
+    ++ "live_loop :hmusic_" ++ (convertContextName name) ++ " do\n"
     ++ genSonicPI (60/bpm) track ++ "end"
   status <- callSonicPi "eval-file HMusic_temp.rb"
   print status
 
 applyToMusic :: (Track -> Track) -> IO ()
-applyToMusic ftrack = do
-  ctx  <- getSonicPiContext
-  v    <- readIORef musicState
-  case v of
+applyToMusic f = do
+  (name, bpm, mtrack) <- getCurrentContext
+  case mtrack of
     Just t -> do
-      mbpm <- readIORef musicBPM
-      case mbpm of
-        Just bpm -> do
-          let newTrack = ftrack t
-          sync <- getSync
-          writeIORef musicState (Just newTrack)
-          writeFile "HMusic_temp.rb" $
-            sync
-            ++ "live_loop :hmusic_" ++ ctx ++ " do\n"
-            ++ genSonicPI bpm newTrack ++ "end"
-          status <- callSonicPi "eval-file HMusic_temp.rb"
-          print status
+      let t' = f t
+      sync <- getSync
+      updateCurrentContext bpm t'
+      writeFile "HMusic_temp.rb" $
+        sync
+        ++ "live_loop :hmusic_" ++ (convertContextName name) ++ " do\n"
+        ++ genSonicPI (60/bpm) t' ++ "end"
+      status <- callSonicPi "eval-file HMusic_temp.rb"
+      print status
     Nothing -> error "No running track to be modified"
+
+convertContextName :: String -> String
+convertContextName name = map replace $ name
+  where
+    replace '-' = '_'
+    replace  c  =  c
 
 -- Sends a command to Sonic Pi through Sonic Pi Tool.
 callSonicPi :: String -> IO (String)
@@ -969,29 +969,61 @@ stopMusicServer = do
   v <- system $ sonicPiToolPath ++ "sonic-pi-tool stop"
   print $ show v
 
--- Get current Sonic Pi musical context, or create a new one if none exists.
-getSonicPiContext :: IO (String)
-getSonicPiContext = do
-  v <- readIORef sonicPiContext
-  case v of
-    -- We already have a context, so just return it.
-    Just ctx -> do
-      return ctx
-    -- Otherwise we create one and save it.
+-- Get current musical context, or create a new one if none exist.
+getCurrentContext :: IO (Context)
+getCurrentContext = do
+  mcontext <- readIORef currentContext
+  case mcontext of
+    Just context -> do
+      return context
     Nothing -> do
       r <- nextRandom
-      -- Replace dashes with underscores before passing to Sonic Pi.
-      let s = let
-            replace '-' = '_'
-            replace  c  =  c
-            in map replace $ show r
-      writeIORef sonicPiContext (Just s)
-      return s
+      let name = show r
+      let context = (name, 0, Nothing)
+      writeIORef currentContext (Just context)
+      return context
+
+updateCurrentContext :: Float -> Track -> IO ()
+updateCurrentContext bpm track = do
+  (name, _, _) <- getCurrentContext
+  let c' = (name, bpm, Just track)
+  writeIORef currentContext $ Just c'
+  contexts <- getContexts
+  case contexts of
+    [] -> do
+      writeIORef sessionContexts $ Just [c']
+    lst -> do
+      writeIORef sessionContexts $ Just (update contexts)
+        where
+          update :: [Context] -> [Context]
+          update [] = [c']
+          update (x@(contextName, _, _):xs)
+            | contextName == name = update xs
+            | otherwise           = x : update xs
 
 -- Change to another context.
-setSonicPiContext :: String -> IO ()
-setSonicPiContext context = do
-  writeIORef sonicPiContext (Just context)
+switchContext :: String -> IO ()
+switchContext name = do
+  mcontext <- findContext name
+  case mcontext of
+    Just context -> do
+      writeIORef currentContext $ Just context
+    Nothing -> do
+      writeIORef currentContext $ Just (name, 0, Nothing)
+
+findContext :: String -> IO (Maybe Context)
+findContext name = do
+  mlst <- readIORef sessionContexts
+  case mlst of
+    Just lst -> do
+      return $ find p lst
+        where
+          p :: Context -> Bool
+          p (contextName, _, _)
+            | name == contextName = True
+            | otherwise           = False
+    Nothing -> do
+      return Nothing
 
 -- Sonic Pi server hostname.
 getSonicPiHost :: IO (String)
@@ -1022,9 +1054,9 @@ setSonicPiHost host =
 syncTo :: String -> IO ()
 syncTo master = do
   writeIORef masterContext (Just master)
-  state <- readIORef musicState
-  case state of
-    Just state -> do
+  (_, _, mtrack) <- getCurrentContext
+  case mtrack of
+    Just _ -> do
       applyToMusic id
     Nothing -> do
       return ()
@@ -1036,7 +1068,7 @@ serve =
   where
     f = \(socket, remote) ->
           do putStrLn $ "Connection established from " ++ show remote
-             mstr <- Net.recv socket 10
+             mstr <- Net.recv socket 4096
              case mstr of
                Just str -> do
                  BS.putStrLn str
@@ -1050,3 +1082,18 @@ connect host =
                               do putStrLn $ "Connection established to "
                                    ++ show remote
                                  writeIORef musicHost (Just host)
+
+-- List of all contexts in current session.
+getContexts :: IO ([Context])
+getContexts = do
+  mhost <- readIORef musicHost
+  case mhost of
+    Just host -> do                     -- TODO get from remote
+      return []
+    Nothing -> do                       -- If our session is local,
+      mcontexts <- readIORef sessionContexts
+      case mcontexts of                 -- we check if we have any active
+        Just c -> do                    -- context, then return those.
+          return c
+        Nothing -> do                   -- Otherwise, we return empty.
+          return []
