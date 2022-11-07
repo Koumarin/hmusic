@@ -13,17 +13,20 @@ import           System.IO.Unsafe
 
 
 data MPattern = X | O | MPattern :|  MPattern
-    deriving (Eq,Show)
+    deriving (Eq, Show, Read)
 data Track = MakeTrack Instrument MPattern 
             | MakeTrackE Instrument [Effect] MPattern 
             | Track :|| Track
             | Master [Effect] Track 
             | MasterN String [Effect] Track
-    deriving (Eq, Show)
+    deriving (Eq, Show, Read)
 
 data Effect = Reverb Float | Amp Float | Attack Float | Release Float | Rate Float | Sustain Float
 		| Start Float | Finish Float | Echo
-    deriving (Eq,Show)
+    deriving (Eq, Show, Read)
+
+data Message = GetContexts
+  deriving (Eq, Show, Read)
 
 type Instrument = String
 
@@ -1061,39 +1064,78 @@ syncTo master = do
     Nothing -> do
       return ()
 
+hmusicPort :: String
+hmusicPort = show 8000
+
 -- Create an HMusic server for clients to connect to.
 serve :: MonadIO m => m r
 serve =
-  Net.serve (Net.Host "localhost") "8000" f
+  Net.serve (Net.Host "localhost") hmusicPort f
   where
     f = \(socket, remote) ->
           do putStrLn $ "Connection established from " ++ show remote
              mstr <- Net.recv socket 4096
              case mstr of
-               Just str -> do
-                 BS.putStrLn str
+               Just message -> do
+                 BS.putStrLn message
+                 dispatch socket $ read $ BS.unpack message
                Nothing -> do
                  return ()
+    dispatch :: Net.Socket -> Message -> IO ()
+    dispatch s GetContexts = do
+      contexts <- getContexts
+      putStrLn $ "Sending contexts: " ++ show contexts
+      Net.send s $ BS.pack $ show contexts
 
 -- Connect to a running HMusic instance.
 connect :: String -> IO ()
 connect host =
-  Net.connect host "8000" $ \(socket, remote) ->
-                              do putStrLn $ "Connection established to "
-                                   ++ show remote
-                                 writeIORef musicHost (Just host)
+  Net.connect host hmusicPort $ \(socket, remote) ->
+                                  do putStrLn $ "Connection established to "
+                                       ++ show remote
+                                     writeIORef musicHost (Just host)
+
+-- Send a message to the HMusic server.
+message :: Message -> IO ()
+message m = do
+  mhost <- readIORef musicHost
+  case mhost of
+    Just host -> do
+      Net.connect host hmusicPort $ \(s, _) ->
+                                      f s m
+    Nothing -> do
+      putStrLn "Please connect to a host first, using \"connect [host name]\"."
+  where
+    f :: Net.Socket -> Message -> IO ()
+    f s GetContexts = do
+      Net.send s $ BS.pack $ show GetContexts
+      mcontexts <- Net.recv s 4096
+      case mcontexts of
+        Just contexts -> do
+          BS.putStrLn contexts
+          -- Don't like this at all, I think message should return this
+          -- instead, please do rewrite me later.
+          writeIORef sessionContexts $ Just (read $ BS.unpack contexts)
+        Nothing -> do
+          putStrLn "Error retrieving contexts from remote."
 
 -- List of all contexts in current session.
 getContexts :: IO ([Context])
 getContexts = do
   mhost <- readIORef musicHost
   case mhost of
-    Just host -> do                     -- TODO get from remote
-      return []
+    Just host -> do                     -- If our session is remote,
+      message GetContexts               -- we request them from the server.
+      contexts <- f                     -- message GetContexts will leave them
+      return contexts                   -- in sessionContexts, so we read that.
     Nothing -> do                       -- If our session is local,
+      contexts <- f                     -- we return the session contexts.
+      return contexts
+  where
+    f = do
       mcontexts <- readIORef sessionContexts
-      case mcontexts of                 -- we check if we have any active
-        Just c -> do                    -- context, then return those.
-          return c
-        Nothing -> do                   -- Otherwise, we return empty.
+      case mcontexts of
+        Just contexts -> do
+          return contexts
+        Nothing -> do
           return []
