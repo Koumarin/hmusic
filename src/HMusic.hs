@@ -992,17 +992,13 @@ updateCurrentContext bpm track = do
   let c' = (name, bpm, Just track)
   writeIORef currentContext $ Just c'
   contexts <- getContexts
-  case contexts of
-    [] -> do
-      writeIORef sessionContexts $ Just [c']
-    lst -> do
-      writeIORef sessionContexts $ Just (update contexts)
-        where
-          update :: [Context] -> [Context]
-          update [] = [c']
-          update (x@(contextName, _, _):xs)
-            | contextName == name = update xs
-            | otherwise           = x : update xs
+  writeIORef sessionContexts $ Just (update contexts name c')
+    where
+      update :: [Context] -> String -> Context -> [Context]
+      update [] _ c' = [c']
+      update (x@(contextName, _, _):xs) name c'
+        | contextName == name = update xs name c'
+        | otherwise           = x : update xs name c'
 
 -- Change to another context.
 switchContext :: String -> IO ()
