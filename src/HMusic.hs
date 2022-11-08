@@ -905,15 +905,9 @@ play bpm track = do
 
 loop :: Float -> Track  -> IO ()
 loop bpm track = do
-  sync         <- getSync
   (name, _, _) <- getCurrentContext
-  updateCurrentContext bpm track
-  writeFile "HMusic_temp.rb" $
-    sync
-    ++ "live_loop :hmusic_" ++ (convertContextName name) ++ " do\n"
-    ++ genSonicPI (60/bpm) track ++ "end"
-  status <- callSonicPi "eval-file HMusic_temp.rb"
-  print status
+  setContext name bpm track
+  sendMusicToSonicPi (Just name) bpm track
 
 applyToMusic :: (Track -> Track) -> IO ()
 applyToMusic f = do
@@ -921,14 +915,8 @@ applyToMusic f = do
   case mtrack of
     Just t -> do
       let t' = f t
-      sync <- getSync
-      updateCurrentContext bpm t'
-      writeFile "HMusic_temp.rb" $
-        sync
-        ++ "live_loop :hmusic_" ++ (convertContextName name) ++ " do\n"
-        ++ genSonicPI (60/bpm) t' ++ "end"
-      status <- callSonicPi "eval-file HMusic_temp.rb"
-      print status
+      setContext name bpm t'
+      sendMusicToSonicPi (Just name) bpm t'
     Nothing -> error "No running track to be modified"
 
 convertContextName :: String -> String
@@ -937,15 +925,37 @@ convertContextName name = map replace $ name
     replace '-' = '_'
     replace  c  =  c
 
+sendMusicToSonicPi :: Maybe String -> Float -> Track -> IO ()
+sendMusicToSonicPi mname bpm track =
+  let context = case mname of
+        Just name -> "live_loop :hmusic_" ++ convertContextName name ++ " do\n"
+        Nothing   -> ""
+  in do sync <- getSync
+        writeFile "HMusic_temp.rb" $
+          sync
+          ++ context
+          ++ genSonicPI (60/bpm) track ++ "end"
+        status <- callSonicPi "eval-file HMusic_temp.rb"
+        print status
+
 -- Sends a command to Sonic Pi through Sonic Pi Tool.
 callSonicPi :: String -> IO (String)
 callSonicPi command = do
-  host   <- getSonicPiHost
+  host   <- getHost
   status <- system $
     sonicPiToolPath ++ intercalate " " ["sonic-pi-tool --host",
                                         host,
                                         command]
   return $ show status
+
+getHost :: IO (String)
+getHost = do
+  mhost <- readIORef musicHost
+  case mhost of
+    Just host -> do
+      return host
+    Nothing -> do
+      return "localhost"
 
 -- Creates line to sync with master context,
 -- or an empty line if no master exists.
@@ -960,7 +970,6 @@ getSync = do
 
 startMusicServer :: IO ()
 startMusicServer = do
-  setSonicPiHost "localhost"
   v <- system $ sonicPiToolPath ++ "sonic-pi-tool start-server"
   print $ show v
 
@@ -988,9 +997,8 @@ getCurrentContext = do
       writeIORef currentContext (Just name)
       return (name, 0, Nothing)
 
-updateCurrentContext :: Float -> Track -> IO ()
-updateCurrentContext bpm track = do
-  (name, _, _) <- getCurrentContext
+setContext :: String -> Float -> Track -> IO ()
+setContext name bpm track = do
   let c' = (name, bpm, Just track)
   contexts <- getContexts
   writeIORef sessionContexts $ Just (update contexts name c')
@@ -1019,31 +1027,6 @@ findContext name = do
             | otherwise           = False
     Nothing -> do
       return Nothing
-
--- Sonic Pi server hostname.
-getSonicPiHost :: IO (String)
-getSonicPiHost = do
-  mhost <- readIORef musicHost
-  case mhost of
-    -- If we already have a host, return it.
-    Just host -> do
-      return host
-    -- Otherwise, we first check if Sonic Pi is running on our machine,
-    Nothing -> do
-      status <- system $ sonicPiToolPath ++ "sonic-pi-tool check"
-      case status of
-        -- then we return our own IP.
-        ExitSuccess -> do
-          setSonicPiHost "localhost"
-          return "localhost"
-        -- Otherwise, we signal an error to the user.
-        otherwise -> do
-          error "Sorry, I could not find a running instance of Sonic Pi."
-
--- Tells Sonic Pi Tool the hostname where to find the server.
-setSonicPiHost :: String -> IO ()
-setSonicPiHost host =
-  writeIORef musicHost (Just host)
 
 -- Makes current track synchronize to given master.
 syncTo :: String -> IO ()
