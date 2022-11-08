@@ -823,7 +823,7 @@ listOfBeats t = case removeBeatTrack t of
 ---------------------------------------------------------------------------
 
 
-currentContext :: IORef (Maybe Context)
+currentContext :: IORef (Maybe String)
 currentContext = unsafePerformIO (newIORef Nothing)
 
 sessionContexts :: IORef (Maybe [Context])
@@ -975,22 +975,26 @@ stopMusicServer = do
 -- Get current musical context, or create a new one if none exist.
 getCurrentContext :: IO (Context)
 getCurrentContext = do
+  contexts <- getContexts
   mcontext <- readIORef currentContext
   case mcontext of
-    Just context -> do
-      return context
+    Just name -> do
+      let p = \(n, _, _) -> n == name in
+        case find p contexts of
+          Just c -> do
+            return c
+          Nothing -> do
+            return (name, 0, Nothing)
     Nothing -> do
       r <- nextRandom
       let name = show r
-      let context = (name, 0, Nothing)
-      writeIORef currentContext (Just context)
-      return context
+      writeIORef currentContext (Just name)
+      return (name, 0, Nothing)
 
 updateCurrentContext :: Float -> Track -> IO ()
 updateCurrentContext bpm track = do
   (name, _, _) <- getCurrentContext
   let c' = (name, bpm, Just track)
-  writeIORef currentContext $ Just c'
   contexts <- getContexts
   writeIORef sessionContexts $ Just (update contexts name c')
     where
@@ -1003,12 +1007,7 @@ updateCurrentContext bpm track = do
 -- Change to another context.
 switchContext :: String -> IO ()
 switchContext name = do
-  mcontext <- findContext name
-  case mcontext of
-    Just context -> do
-      writeIORef currentContext $ Just context
-    Nothing -> do
-      writeIORef currentContext $ Just (name, 0, Nothing)
+  writeIORef currentContext (Just name)
 
 findContext :: String -> IO (Maybe Context)
 findContext name = do
