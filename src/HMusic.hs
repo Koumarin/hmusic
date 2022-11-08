@@ -829,9 +829,6 @@ currentContext = unsafePerformIO (newIORef Nothing)
 sessionContexts :: IORef (Maybe [Context])
 sessionContexts = unsafePerformIO (newIORef Nothing)
 
-sonicPiHost :: IORef (Maybe String)
-sonicPiHost = unsafePerformIO (newIORef Nothing)
-
 masterContext :: IORef (Maybe String)
 masterContext = unsafePerformIO (newIORef Nothing)
 
@@ -1026,8 +1023,8 @@ findContext name = do
 -- Sonic Pi server hostname.
 getSonicPiHost :: IO (String)
 getSonicPiHost = do
-  host <- readIORef sonicPiHost
-  case host of
+  mhost <- readIORef musicHost
+  case mhost of
     -- If we already have a host, return it.
     Just host -> do
       return host
@@ -1046,7 +1043,7 @@ getSonicPiHost = do
 -- Tells Sonic Pi Tool the hostname where to find the server.
 setSonicPiHost :: String -> IO ()
 setSonicPiHost host =
-  writeIORef sonicPiHost (Just host)
+  writeIORef musicHost (Just host)
 
 -- Makes current track synchronize to given master.
 syncTo :: String -> IO ()
