@@ -939,9 +939,13 @@ applyToContext name f = do
   where
     noTrackError = error "No running track to be modified!"
 
---extend :: Track -> IO ()
+extend :: Track -> IO ()
+extend track =
+  applyToMusic (|+ track)
 
---extendContext :: String -> Track -> IO ()
+extendContext :: String -> Track -> IO ()
+extendContext name track =
+  applyToContext name (|+ track)
 
 convertContextName :: String -> String
 convertContextName name = map replace $ name
