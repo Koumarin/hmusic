@@ -1049,17 +1049,13 @@ switchContext name = do
 
 findContext :: String -> IO (Maybe Context)
 findContext name = do
-  mlst <- readIORef sessionContexts
-  case mlst of
-    Just lst -> do
-      return $ find p lst
-        where
-          p :: Context -> Bool
-          p (contextName, _, _)
-            | name == contextName = True
-            | otherwise           = False
-    Nothing -> do
-      return Nothing
+  contexts <- getContexts
+  return $ find p contexts
+  where
+    p :: Context -> Bool
+    p (contextName, _, _)
+      | name == contextName = True
+      | otherwise           = False
 
 -- Makes current track synchronize to given master.
 syncTo :: String -> IO ()
