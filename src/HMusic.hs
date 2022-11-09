@@ -899,24 +899,49 @@ effectToString Echo = "echo"
 
 play :: Float -> Track  -> IO ()
 play bpm track = do
-  --writeIORef musicState (Just track)
   writeFile "HMusic_temp.rb" $ genSonicPI (60/bpm) track
   status <- callSonicPi "eval-file HMusic_temp.rb"
   print status
 
 loop :: Float -> Track  -> IO ()
 loop bpm track = do
-  (name, _, _) <- getCurrentContext
-  setContext (name, bpm, Just track)
+  mname <- readIORef currentContext
+  case mname of
+    Just name ->
+      setContext (name, bpm, Just track)
+    Nothing -> do
+      name <- getNewContext
+      writeIORef currentContext (Just name)
+      setContext (name, bpm, Just track)
 
 applyToMusic :: (Track -> Track) -> IO ()
 applyToMusic f = do
-  (name, bpm, mtrack) <- getCurrentContext
-  case mtrack of
-    Just t -> do
-      let t' = f t
-      setContext (name, bpm, Just t')
-    Nothing -> error "No running track to be modified"
+  mname <- readIORef currentContext
+  case mname of
+    Just name ->
+      applyToContext name f
+    Nothing ->
+      error "No running track to be modified!"
+
+applyToContext :: String -> (Track -> Track) -> IO ()
+applyToContext name f = do
+  context <- findContext name
+  case context of
+    Just (_, bpm, mtrack) ->
+      case mtrack of
+        Just t -> do
+          let t' = f t
+          setContext (name, bpm, Just t')
+        Nothing ->
+          noTrackError
+    Nothing ->
+      noTrackError
+  where
+    noTrackError = error "No running track to be modified!"
+
+--extend :: Track -> IO ()
+
+--extendContext :: String -> Track -> IO ()
 
 convertContextName :: String -> String
 convertContextName name = map replace $ name
@@ -981,23 +1006,20 @@ stopMusicServer = do
   print $ show v
 
 -- Get current musical context, or create a new one if none exist.
-getCurrentContext :: IO (Context)
+getCurrentContext :: IO (Maybe Context)
 getCurrentContext = do
-  contexts <- getContexts
-  mcontext <- readIORef currentContext
-  case mcontext of
+  mname <- readIORef currentContext
+  case mname of
     Just name -> do
-      let p = \(n, _, _) -> n == name in
-        case find p contexts of
-          Just c -> do
-            return c
-          Nothing -> do
-            return (name, 0, Nothing)
-    Nothing -> do
-      r <- nextRandom
-      let name = show r
-      writeIORef currentContext (Just name)
-      return (name, 0, Nothing)
+      context <- findContext name
+      return context
+    Nothing   ->
+      return Nothing
+
+getNewContext :: IO (String)
+getNewContext = do
+  r <- nextRandom
+  return $ show r
 
 setContext :: Context -> IO ()
 setContext c@(name, bpm, track) = do
@@ -1039,8 +1061,8 @@ findContext name = do
 syncTo :: String -> IO ()
 syncTo master = do
   writeIORef masterContext (Just master)
-  (_, _, mtrack) <- getCurrentContext
-  case mtrack of
+  mcontext <- getCurrentContext
+  case mcontext of
     Just _ -> do
       applyToMusic id
     Nothing -> do
