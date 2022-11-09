@@ -26,6 +26,7 @@ data Effect = Reverb Float | Amp Float | Attack Float | Release Float | Rate Flo
     deriving (Eq, Show, Read)
 
 data Message = GetContexts
+             | SetContext Context
   deriving (Eq, Show, Read)
 
 type Instrument = String
@@ -906,8 +907,7 @@ play bpm track = do
 loop :: Float -> Track  -> IO ()
 loop bpm track = do
   (name, _, _) <- getCurrentContext
-  setContext name bpm track
-  sendMusicToSonicPi (Just name) bpm track
+  setContext (name, bpm, Just track)
 
 applyToMusic :: (Track -> Track) -> IO ()
 applyToMusic f = do
@@ -915,8 +915,7 @@ applyToMusic f = do
   case mtrack of
     Just t -> do
       let t' = f t
-      setContext name bpm t'
-      sendMusicToSonicPi (Just name) bpm t'
+      setContext (name, bpm, Just t')
     Nothing -> error "No running track to be modified"
 
 convertContextName :: String -> String
@@ -925,18 +924,21 @@ convertContextName name = map replace $ name
     replace '-' = '_'
     replace  c  =  c
 
-sendMusicToSonicPi :: Maybe String -> Float -> Track -> IO ()
-sendMusicToSonicPi mname bpm track =
-  let context = case mname of
-        Just name -> "live_loop :hmusic_" ++ convertContextName name ++ " do\n"
-        Nothing   -> ""
-  in do sync <- getSync
-        writeFile "HMusic_temp.rb" $
-          sync
-          ++ context
-          ++ genSonicPI (60/bpm) track ++ "end"
-        status <- callSonicPi "eval-file HMusic_temp.rb"
-        print status
+sendMusicToSonicPi :: Maybe String -> Float -> Maybe Track -> IO ()
+sendMusicToSonicPi mname bpm mtrack = do
+  sync <- getSync
+  writeFile "HMusic_temp.rb" $
+    sync ++ music
+  status <- callSonicPi "eval-file HMusic_temp.rb"
+  print status
+  where
+    music = case mname of
+      Just name -> "live_loop :hmusic_" ++ convertContextName name ++ " do\n"
+                   ++ body ++ "end\n"
+      Nothing   -> body
+    body = case mtrack of
+      Just track -> genSonicPI (60/bpm) track
+      Nothing    -> "sleep " ++ show (60/bpm)
 
 -- Sends a command to Sonic Pi through Sonic Pi Tool.
 callSonicPi :: String -> IO (String)
@@ -997,17 +999,22 @@ getCurrentContext = do
       writeIORef currentContext (Just name)
       return (name, 0, Nothing)
 
-setContext :: String -> Float -> Track -> IO ()
-setContext name bpm track = do
-  let c' = (name, bpm, Just track)
-  contexts <- getContexts
-  writeIORef sessionContexts $ Just (update contexts name c')
-    where
-      update :: [Context] -> String -> Context -> [Context]
-      update [] _ c' = [c']
-      update (x@(contextName, _, _):xs) name c'
-        | contextName == name = update xs name c'
-        | otherwise           = x : update xs name c'
+setContext :: Context -> IO ()
+setContext c@(name, bpm, track) = do
+  host <- readIORef musicHost
+  case host of
+    Just _ -> do
+      message $ SetContext c
+    Nothing -> do
+      sendMusicToSonicPi (Just name) bpm track
+      contexts <- getContexts
+      writeIORef sessionContexts $ Just (update contexts)
+        where
+          update :: [Context] -> [Context]
+          update [] = [c]
+          update (x@(contextName, _, _):xs)
+            | contextName == name = update xs
+            | otherwise           = x : update xs
 
 -- Change to another context.
 switchContext :: String -> IO ()
@@ -1061,6 +1068,9 @@ serve =
       contexts <- getContexts
       putStrLn $ "Sending contexts: " ++ show contexts
       Net.send s $ BS.pack $ show contexts
+    dispatch _ (SetContext c) = do
+      putStrLn $ "Setting context: " ++ show c
+      setContext c
 
 -- Connect to a running HMusic instance.
 connect :: String -> IO ()
@@ -1087,12 +1097,13 @@ message m = do
       mcontexts <- Net.recv s 4096
       case mcontexts of
         Just contexts -> do
-          BS.putStrLn contexts
           -- Don't like this at all, I think message should return this
           -- instead, please do rewrite me later.
           writeIORef sessionContexts $ Just (read $ BS.unpack contexts)
         Nothing -> do
           putStrLn "Error retrieving contexts from remote."
+    f s msg = do
+      Net.send s $ BS.pack $ show msg
 
 -- List of all contexts in current session.
 getContexts :: IO ([Context])
