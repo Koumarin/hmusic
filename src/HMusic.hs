@@ -1,5 +1,6 @@
 module HMusic where
 
+import           Control.Concurrent
 import           Control.Monad.IO.Class
 import qualified Data.ByteString.Char8  as BS
 import           Data.List
@@ -1072,9 +1073,8 @@ hmusicPort :: String
 hmusicPort = show 8000
 
 -- Create an HMusic server for clients to connect to.
-serve :: MonadIO m => m r
-serve =
-  Net.serve (Net.Host "localhost") hmusicPort f
+serve :: IO ThreadId
+serve = forkIO $ Net.serve (Net.Host "localhost") hmusicPort f
   where
     f = \(socket, remote) ->
           do putStrLn $ "Connection established from " ++ show remote
