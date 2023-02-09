@@ -940,6 +940,10 @@ applyToContext name f = do
   where
     noTrackError = error "No running track to be modified!"
 
+stopContext :: String -> IO ()
+stopContext name = do
+  setContext (name, 120.0, Nothing)
+
 extend :: Track -> IO ()
 extend track =
   applyToMusic (|+ track)
@@ -1010,7 +1014,6 @@ stopMusicServer = do
   v <- system $ sonicPiToolPath ++ "sonic-pi-tool stop"
   print $ show v
 
--- Get current musical context, or create a new one if none exist.
 getCurrentContext :: IO (Maybe Context)
 getCurrentContext = do
   mname <- readIORef currentContext
