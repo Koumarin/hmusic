@@ -1046,10 +1046,28 @@ setContext c@(name, bpm, track) = do
             | contextName == name = update xs
             | otherwise           = x : update xs
 
+showContext :: IO ()
+showContext = do
+  ctx <- getCurrentContext
+  case ctx of
+    Just (_, _, mtrack) ->
+      case mtrack of
+        Just track ->
+          print track
+        Nothing ->
+          print "No track playing in current context."
+    Nothing ->
+      print "No context."
+
 -- Change to another context.
 switchContext :: String -> IO ()
 switchContext name = do
   writeIORef currentContext (Just name)
+
+switchAndShow :: String -> IO ()
+switchAndShow name = do
+  switchContext name
+  showContext
 
 findContext :: String -> IO (Maybe Context)
 findContext name = do
